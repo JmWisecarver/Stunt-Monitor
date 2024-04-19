@@ -5,11 +5,6 @@
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 
-#define HDCCONFIGADDRESS 0x02
-#define HDC1080ADDRESS 0x40
-#define HUMIDITY 0x01
-#define TEMPERATURE 0x00
-
 // MPU6050 addresses
 // #define MPU6050_ADDRESS_AD0_LOW 0x68 // address pin low (GND), default for InvenSense evaluation board
 
@@ -18,7 +13,6 @@ SemaphoreHandle_t i2cMutex;
 
 void collectData_t(void *queue);
 void readGPS_t(void *queue);
-void readHDC1080_temperature_t(void *queue);
 void readMPU6050(void *queue);
 
 // NOTE: a squid is a slang term for a "show off" on a street bike
@@ -97,56 +91,6 @@ void setup()
     xTaskCreate(readMPU6050, "Read MPU6050 data", 2048, (void *)accelReadings, 3, NULL);
 }
 
-// This is an example function of reading from an I2C device while using the GPS
-// using the Wire.h library
-void readHDC1080_temperature_t(void *queue)
-{
-    uint8_t binaryTemp[2];
-    uint32_t tempCelcius;
-    uint8_t config[3];
-    config;
-    config[0] = HDCCONFIGADDRESS;
-    config[1] = 0x06;
-    config[2] = 0x0;
-    Wire.beginTransmission(HDC1080ADDRESS);
-    Wire.write(config, 3);
-    Wire.endTransmission();
-    vTaskDelay(5);
-
-    while (1)
-    {
-        if (xSemaphoreTake(i2cMutex, portMAX_DELAY))
-        {
-            Wire.beginTransmission(HDC1080ADDRESS);
-            Wire.write(TEMPERATURE);
-            Wire.endTransmission();
-            vTaskDelay(5);
-            Wire.requestFrom(HDC1080ADDRESS, 2);
-            while (Wire.available())
-            {
-                binaryTemp[0] = Wire.read(); // read from the starting register
-                binaryTemp[1] = Wire.read();
-            }
-            xSemaphoreGive(i2cMutex);
-        }
-
-        tempCelcius = binaryTemp[0] << 8 | binaryTemp[1];
-        // This bit shift is used to help with data accuracy. It will be shifted back after computations
-        tempCelcius = tempCelcius << 8;
-        // Formula in data sheet to convert the binary to a temp in celcius
-        // Adjustments are likely possible and maybe necessary to get more accurate farenheit readings
-        tempCelcius = tempCelcius * 165;
-        tempCelcius = tempCelcius / 65536;
-        // Shift back
-        tempCelcius = tempCelcius >> 8;
-        tempCelcius = (tempCelcius - 40);
-
-        Serial.print("Temperature is: ");
-        Serial.print(tempCelcius);
-        Serial.println(" degrees celcius.");
-        vTaskDelay(1000);
-    }
-}
 
 void collectData_t(void *queue)
 {
