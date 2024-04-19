@@ -87,7 +87,6 @@ void setup()
     collectDataQueues_ptr->accelReadings = accelReadings;
     xTaskCreate(readGPS_t, "Read the air530 grove GPS data", 8096, (void *)gpsReadings, 2, NULL);
     xTaskCreate(collectData_t, "Collect data from the reading tasks", 8096, (void *)collectDataQueues_ptr, 1, NULL);
-    xTaskCreate(readHDC1080_temperature_t, "Read temperature from HDC1080", 2048, (void *)gpsReadings, 3, NULL);
     xTaskCreate(readMPU6050, "Read MPU6050 data", 2048, (void *)accelReadings, 3, NULL);
 }
 
@@ -109,50 +108,95 @@ void collectData_t(void *queue)
         // Possibilities: Wheelie, Stoppie, Crash
 
         // get lat/long data and time for start
+
+        int angleYData = 0;
+        // Repeatedly get accelerometer information here and move on when ending circumstances met
+        //Wheelie or stoppie must be ~38 degrees in either direction
+        while((angleYData < 38) || (angleYData > 322))
+        {
+            if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
+            {
+                // added temporary print statements to see if the data is being read correctly
+                /*
+                Serial.print("AccelX: ");
+                Serial.println(accelData_ptr->AccelX);
+                Serial.print(" AccelY: ");
+                Serial.println(accelData_ptr->AccelY);
+                Serial.print(" AccelZ: ");
+                Serial.println(accelData_ptr->AccelZ);
+                Serial.print(" GyroX: ");
+                Serial.println(accelData_ptr->GyroX);
+                Serial.print(" GyroY: ");
+                Serial.println(accelData_ptr->GyroY);
+                Serial.print(" GyroZ: ");
+                Serial.println(accelData_ptr->GyroZ);
+                Serial.print(" Temp: ");
+                Serial.println(accelData_ptr->Temp);
+
+                // ====== Untested code below ======
+
+                Serial.print(" AngleX: ");
+                Serial.println(accelData_ptr->AngleX);
+                Serial.print(" AngleY: ");
+                Serial.println(accelData_ptr->AngleY);
+                Serial.print(" AngleZ: ");
+                Serial.println(accelData_ptr->AngleZ);
+
+                // ====== Untested code above ======
+                */
+                angleYData = accelData_ptr->AngleY;
+                delete accelData_ptr; // free the memory
+                accelData_ptr = nullptr;
+            }
+        }
+        //A stunt has begun
         startTime = millis();
         if (xQueueReceive(gpsReadings, &rider.latlng[0], 500) == pdTRUE)
-        {
-            Serial.print("Rider stunt begins at: ");
-            Serial.print(rider.latlng[0], 6);
-            Serial.print(",");
-            Serial.println(rider.latlng[1], 6);
-        }
-
-        // Repeatedly get accelerometer information here and move on when ending circumstances met
-        if (xQueueReceive(accelReadings, &accelData_ptr, 100) == pdTRUE)
-        {
-            // added temporary print statements to see if the data is being read correctly
-            Serial.print("AccelX: ");
-            Serial.println(accelData_ptr->AccelX);
-            Serial.print(" AccelY: ");
-            Serial.println(accelData_ptr->AccelY);
-            Serial.print(" AccelZ: ");
-            Serial.println(accelData_ptr->AccelZ);
-            Serial.print(" GyroX: ");
-            Serial.println(accelData_ptr->GyroX);
-            Serial.print(" GyroY: ");
-            Serial.println(accelData_ptr->GyroY);
-            Serial.print(" GyroZ: ");
-            Serial.println(accelData_ptr->GyroZ);
-            Serial.print(" Temp: ");
-            Serial.println(accelData_ptr->Temp);
-
-            // ====== Untested code below ======
-
-            Serial.print(" AngleX: ");
-            Serial.println(accelData_ptr->AngleX);
-            Serial.print(" AngleY: ");
-            Serial.println(accelData_ptr->AngleY);
-            Serial.print(" AngleZ: ");
-            Serial.println(accelData_ptr->AngleZ);
-
-            // ====== Untested code above ======
-
-            delete accelData_ptr; // free the memory
-            accelData_ptr = nullptr;
-        }
+            {
+                Serial.print("Rider stunt begins at: ");
+                Serial.print(rider.latlng[0], 6);
+                Serial.print(",");
+                Serial.println(rider.latlng[1], 6);
+            }
         // Timeout, Wheelie end, Stoppie end, crash movement stopped etc.
         // NOTE: wheelies have potential to go for minutes at a time and thus the timeout cannot be too soon.
+        while((angleYData >= 38) && (angleYData <= 322))
+        {
+            if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
+            {
+                // added temporary print statements to see if the data is being read correctly
+                /*
+                Serial.print("AccelX: ");
+                Serial.println(accelData_ptr->AccelX);
+                Serial.print(" AccelY: ");
+                Serial.println(accelData_ptr->AccelY);
+                Serial.print(" AccelZ: ");
+                Serial.println(accelData_ptr->AccelZ);
+                Serial.print(" GyroX: ");
+                Serial.println(accelData_ptr->GyroX);
+                Serial.print(" GyroY: ");
+                Serial.println(accelData_ptr->GyroY);
+                Serial.print(" GyroZ: ");
+                Serial.println(accelData_ptr->GyroZ);
+                Serial.print(" Temp: ");
+                Serial.println(accelData_ptr->Temp);
+
+                // ====== Untested code below ======
+
+                Serial.print(" AngleX: ");
+                Serial.println(accelData_ptr->AngleX);
+                Serial.print(" AngleY: ");
+                Serial.println(accelData_ptr->AngleY);
+                Serial.print(" AngleZ: ");
+                Serial.println(accelData_ptr->AngleZ);
+
+                // ====== Untested code above ======
+                */
+                angleYData = accelData_ptr->AngleY;
+                delete accelData_ptr; // free the memory
+                accelData_ptr = nullptr;
+            }
+        }
 
         // get lat/long data and time for end of event
         endTime = millis();
