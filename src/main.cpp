@@ -11,7 +11,7 @@
 #define TEMPERATURE 0x00
 
 // MPU6050 addresses
-#define MPU6050_ADDRESS_AD0_LOW 0x68 // address pin low (GND), default for InvenSense evaluation board
+// #define MPU6050_ADDRESS_AD0_LOW 0x68 // address pin low (GND), default for InvenSense evaluation board
 
 // Mutexes and Semaphores
 SemaphoreHandle_t i2cMutex;
@@ -69,6 +69,9 @@ typedef struct AccelData
     double GyroY;
     double GyroZ;
     double Temp;
+    double AngleX;
+    double AngleY;
+    double AngleZ;
 
 } AccelData;
 
@@ -189,6 +192,17 @@ void collectData_t(void *queue)
             Serial.println(accelData_ptr->GyroZ);
             Serial.print(" Temp: ");
             Serial.println(accelData_ptr->Temp);
+
+            // ====== Untested code below ======
+
+            Serial.print(" AngleX: ");
+            Serial.println(accelData_ptr->AngleX);
+            Serial.print(" AngleY: ");
+            Serial.println(accelData_ptr->AngleY);
+            Serial.print(" AngleZ: ");
+            Serial.println(accelData_ptr->AngleZ);
+
+            // ====== Untested code above ======
 
             delete accelData_ptr; // free the memory
             accelData_ptr = nullptr;
@@ -330,6 +344,10 @@ void readMPU6050(void *queue)
 
     QueueHandle_t accelQueue = (QueueHandle_t)queue;
 
+    double xAngle = 0;
+    double yAngle = 0;
+    double zAngle = 0;
+
     Serial.println("MPU6050 is ready to go!");
 
     vTaskDelay(100);
@@ -356,8 +374,31 @@ void readMPU6050(void *queue)
         accelData_ptr->GyroZ = g.gyro.z;
         accelData_ptr->Temp = temp.temperature;
 
+        // ====== Untested code below ======
+
+        // calculate the angle with min and max values of the accelerometer
+        int xAngle = map(accelData_ptr->AccelX, -500, 500, -90, 90);
+        int yAngle = map(accelData_ptr->AccelY, -500, 500, -90, 90);
+        int zAngle = map(accelData_ptr->AccelZ, -500, 500, -90, 90);
+
+        xAngle = RAD_TO_DEG * (atan2(-a.acceleration.y, -a.acceleration.z) + PI);
+        yAngle = RAD_TO_DEG * (atan2(-a.acceleration.x, -a.acceleration.z) + PI);
+        zAngle = RAD_TO_DEG * (atan2(-a.acceleration.x, -a.acceleration.y) + PI);
+
+        accelData_ptr->AngleX = xAngle;
+        accelData_ptr->AngleY = yAngle;
+        accelData_ptr->AngleZ = zAngle;
+
+        // ====== Untested code above ======
+
         if (uxQueueSpacesAvailable(accelQueue) == 0)
         {
+            // free the memory for all the items in the queue
+            AccelData *temp_ptr = nullptr;
+            while (xQueueReceive(accelQueue, &temp_ptr, 0) == pdTRUE)
+            {
+                delete temp_ptr;
+            }
             xQueueReset(accelQueue);
         }
 
