@@ -4,6 +4,12 @@
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
+#include <HTTPClient.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <ArduinoJson.h>
+
+#define ARDUINOJSON_USE_DOUBLE 1
 
 // MPU6050 addresses
 // #define MPU6050_ADDRESS_AD0_LOW 0x68 // address pin low (GND), default for InvenSense evaluation board
@@ -13,37 +19,41 @@ SemaphoreHandle_t i2cMutex;
 
 void collectData_t(void *queue);
 void readGPS_t(void *queue);
-void readMPU6050(void *queue);
+void readMPU6050_t(void *queue);
+void communicateWithServer_t(void * queue);
+double getRelativeDegrees(double base);
 
 // NOTE: a squid is a slang term for a "show off" on a street bike
 class squid
 {
 public:
-    double latlng[4];        // Latitude/longitude at the start and end of special event
-    double bikeYaw[100];     // WheelieAngle
-    double bikeRoll[100];    // WheelieRoll
-    unsigned long stuntTime; // Time spent in stunt
+    double beginLat;  // Latitude/longitude at the start and end of special event
+    double beginLng;
+    double endLat;
+    double endLng;
+
+    double averageBikeYaw;     // WheelieAngle
+    int stuntTime; // Time spent in stunt
 
     void clearData()
     {
-        for (int i = 0; i < 4; i++)
-            latlng[i] = 0;
-        for (int i = 0; i < 100; i++)
-        {
-            bikeYaw[i] = 0;
-            bikeRoll[i] = 0;
-        }
+        
+        beginLat = 0;
+        beginLng = 0;
+        endLat = 0;
+        endLng = 0;
+        averageBikeYaw = 0;
+        stuntTime = 0;
     }
     // When object is created the value 0 is used to show no value has been entered
     squid()
     {
-        for (int i = 0; i < 4; i++)
-            latlng[i] = 0;
-        for (int i = 0; i < 100; i++)
-        {
-            bikeYaw[i] = 0;
-            bikeRoll[i] = 0;
-        }
+        beginLat = 0;
+        beginLng = 0;
+        endLat = 0;
+        endLng = 0;
+        averageBikeYaw = 0;
+        stuntTime = 0;
     }
 };
 
@@ -52,6 +62,7 @@ class dataQueues
 public:
     QueueHandle_t gpsReadings;
     QueueHandle_t accelReadings;
+    QueueHandle_t riderData;
 };
 
 typedef struct AccelData
@@ -80,26 +91,128 @@ void setup()
     i2cMutex = xSemaphoreCreateMutex();
     QueueHandle_t gpsReadings;
     QueueHandle_t accelReadings;
+    QueueHandle_t riderData;
+    riderData = xQueueCreate(1, sizeof(squid));
     gpsReadings = xQueueCreate(1, ((sizeof(double)) * 2));
     accelReadings = xQueueCreate(1, ((sizeof(double)) * 3));
     dataQueues *collectDataQueues_ptr = new dataQueues;
     collectDataQueues_ptr->gpsReadings = gpsReadings;
     collectDataQueues_ptr->accelReadings = accelReadings;
+    collectDataQueues_ptr->riderData = riderData;
     xTaskCreate(readGPS_t, "Read the air530 grove GPS data", 8096, (void *)gpsReadings, 2, NULL);
-    xTaskCreate(collectData_t, "Collect data from the reading tasks", 8096, (void *)collectDataQueues_ptr, 1, NULL);
-    xTaskCreate(readMPU6050, "Read MPU6050 data", 2048, (void *)accelReadings, 3, NULL);
+    xTaskCreate(collectData_t, "Collect data from the reading tasks", 8096, (void *)collectDataQueues_ptr, 4, NULL);
+    xTaskCreate(readMPU6050_t, "Read MPU6050 data", 2048, (void *)accelReadings, 3, NULL);
+    xTaskCreate(communicateWithServer_t, "Handle communications with HTTP server", 16192, (void *)riderData, 5, NULL);
 }
 
+//Make degrees more human readable to a range of -180 to 180
+double getRelativeDegrees(double degrees)
+{
+    if(degrees > 180)
+    {
+        degrees = degrees - 360;
+    }
+    return degrees;
+}
+
+void communicateWithServer_t(void * queue)
+{
+    QueueHandle_t riderDataQueue = (QueueHandle_t)queue;
+    unsigned long lastTime = 0;
+    unsigned long timerDelay = 5000;
+    const char * ssid = "AndroidAP235F";
+    const char* password = "umbl7415";
+    String serverName = "http://stunt-monitor.lithium720.pw/receive.php";
+    //Connect to phones hotspot
+    WiFi.begin(ssid, password);
+    Serial.println("Connecting");
+    while(WiFi.status() != WL_CONNECTED)    {
+        vTaskDelay(500);
+        Serial.print(".");
+    }
+    Serial.print("Connected to WiFi network with IP Address: ");
+    Serial.println(WiFi.localIP());
+    squid rider;
+    while(1)
+    {
+        if(xQueueReceive(riderDataQueue, &rider, 0) == pdTRUE)
+        {
+            JsonDocument doc;
+            double lat_begin = rider.beginLat;
+            double lng_begin = rider.beginLng;
+            double lat_end = rider.endLat;
+            double lng_end = rider.endLng;
+
+            Serial.println(rider.beginLat);
+            Serial.println(rider.beginLng);
+            Serial.println(rider.endLat);
+            Serial.println(rider.endLng);
+            Serial.println(rider.stuntTime);
+            doc["Time_in_stunt"] = rider.stuntTime;
+            doc["Rider_lat_begin"] = lat_begin;
+            doc["Rider_lng_begin"] = lng_begin;
+            doc["Rider_lat_end"] = lat_end;
+            doc["Rider_lng_end"] = lng_end;
+            doc["Avg_Wheelie_angle"] = rider.averageBikeYaw;
+
+            String jsonDoc;
+            serializeJson(doc, jsonDoc);
+            Serial.println(jsonDoc);
+            if ((millis() - lastTime) > timerDelay)
+                {
+                if(WiFi.status() == WL_CONNECTED)
+                {
+                    WiFiClient client;
+                    HTTPClient http;
+
+                    http.begin(client, serverName);
+                    int httpResponseCode = http.POST(jsonDoc);
+
+                    http.addHeader("Content-Type", "application/json");
+
+                    Serial.print("HTTP Response code: ");
+                    Serial.println(httpResponseCode);
+                    String payload = http.getString();
+                        Serial.println(payload);
+
+                    http.end();
+                }
+                else
+                {
+                    Serial.println("WiFi Disconnected");
+                }
+            }
+        }
+        vTaskDelay(500);
+    }
+    
+}
 
 void collectData_t(void *queue)
 {
     dataQueues *queueStruct = (dataQueues *)queue;
     QueueHandle_t gpsReadings = queueStruct->gpsReadings;
     QueueHandle_t accelReadings = queueStruct->accelReadings;
+    QueueHandle_t riderData = queueStruct->riderData;
+    
 
     AccelData *accelData_ptr = nullptr;
     squid rider;
-    // float test = 0;
+    //The angle of which the device is mounted on the y-axis
+    double basePosition = 0;
+    double latLng[2] = {0, 0};
+    bool baseSet = false;
+    //Get the base position
+    while(baseSet == false)
+    {
+        if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
+        {
+            basePosition = getRelativeDegrees(accelData_ptr->AngleY);
+            baseSet = true;
+        }
+    }
+    Serial.printf("Base position is:");
+    Serial.println(basePosition);
     unsigned long startTime;
     unsigned long endTime;
     while (1)
@@ -109,110 +222,82 @@ void collectData_t(void *queue)
 
         // get lat/long data and time for start
 
-        int angleYData = 0;
+        double angleYData = 0;
+        int loop = 0;
+        double averageYAngle = 0;
         // Repeatedly get accelerometer information here and move on when ending circumstances met
         //Wheelie or stoppie must be ~38 degrees in either direction
-        while((angleYData < 38) || (angleYData > 322))
+        while((angleYData < 35 + basePosition) && (angleYData > -35 + basePosition))
         {
             if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
             {
-                // added temporary print statements to see if the data is being read correctly
-                /*
-                Serial.print("AccelX: ");
-                Serial.println(accelData_ptr->AccelX);
-                Serial.print(" AccelY: ");
-                Serial.println(accelData_ptr->AccelY);
-                Serial.print(" AccelZ: ");
-                Serial.println(accelData_ptr->AccelZ);
-                Serial.print(" GyroX: ");
-                Serial.println(accelData_ptr->GyroX);
-                Serial.print(" GyroY: ");
-                Serial.println(accelData_ptr->GyroY);
-                Serial.print(" GyroZ: ");
-                Serial.println(accelData_ptr->GyroZ);
-                Serial.print(" Temp: ");
-                Serial.println(accelData_ptr->Temp);
-
-                // ====== Untested code below ======
-
-                Serial.print(" AngleX: ");
-                Serial.println(accelData_ptr->AngleX);
-                Serial.print(" AngleY: ");
-                Serial.println(accelData_ptr->AngleY);
-                Serial.print(" AngleZ: ");
-                Serial.println(accelData_ptr->AngleZ);
-
-                // ====== Untested code above ======
-                */
-                angleYData = accelData_ptr->AngleY;
+                angleYData = getRelativeDegrees(accelData_ptr->AngleY);
+                averageYAngle = angleYData;
                 delete accelData_ptr; // free the memory
                 accelData_ptr = nullptr;
             }
         }
+        loop++;
         //A stunt has begun
         startTime = millis();
-        if (xQueueReceive(gpsReadings, &rider.latlng[0], 500) == pdTRUE)
+        if (xQueueReceive(gpsReadings, &latLng, 500) == pdTRUE)
             {
+                rider.beginLat = latLng[0];
+                rider.beginLng = latLng[1];
                 Serial.print("Rider stunt begins at: ");
-                Serial.print(rider.latlng[0], 6);
+                Serial.print(rider.beginLat, 6);
                 Serial.print(",");
-                Serial.println(rider.latlng[1], 6);
+                Serial.println(rider.beginLng, 6);
+            }
+        else
+            {
+                rider.beginLat = 0;
+                rider.beginLng = 0;
             }
         // Timeout, Wheelie end, Stoppie end, crash movement stopped etc.
         // NOTE: wheelies have potential to go for minutes at a time and thus the timeout cannot be too soon.
-        while((angleYData >= 38) && (angleYData <= 322))
+        while((angleYData >= 35 + basePosition) || (angleYData <= -35 + basePosition))
         {
             if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
             {
-                // added temporary print statements to see if the data is being read correctly
-                /*
-                Serial.print("AccelX: ");
-                Serial.println(accelData_ptr->AccelX);
-                Serial.print(" AccelY: ");
-                Serial.println(accelData_ptr->AccelY);
-                Serial.print(" AccelZ: ");
-                Serial.println(accelData_ptr->AccelZ);
-                Serial.print(" GyroX: ");
-                Serial.println(accelData_ptr->GyroX);
-                Serial.print(" GyroY: ");
-                Serial.println(accelData_ptr->GyroY);
-                Serial.print(" GyroZ: ");
-                Serial.println(accelData_ptr->GyroZ);
-                Serial.print(" Temp: ");
-                Serial.println(accelData_ptr->Temp);
-
-                // ====== Untested code below ======
-
-                Serial.print(" AngleX: ");
-                Serial.println(accelData_ptr->AngleX);
-                Serial.print(" AngleY: ");
-                Serial.println(accelData_ptr->AngleY);
-                Serial.print(" AngleZ: ");
-                Serial.println(accelData_ptr->AngleZ);
-
-                // ====== Untested code above ======
-                */
-                angleYData = accelData_ptr->AngleY;
+                angleYData = getRelativeDegrees(accelData_ptr->AngleY);
+                loop++;
+                averageYAngle = angleYData + averageYAngle;
                 delete accelData_ptr; // free the memory
                 accelData_ptr = nullptr;
+                Serial.println(angleYData);
             }
         }
+        averageYAngle = averageYAngle/loop;
 
         // get lat/long data and time for end of event
         endTime = millis();
         rider.stuntTime = endTime - startTime;
-        if (xQueueReceive(gpsReadings, &rider.latlng[2], 500) == pdTRUE)
+        rider.averageBikeYaw = averageYAngle;
+        if (xQueueReceive(gpsReadings, &latLng, 500) == pdTRUE)
         {
+            rider.endLat = latLng[0];
+            rider.endLng = latLng[1];
             Serial.print("Rider stunt ends at: ");
-            Serial.print(rider.latlng[2], 6);
+            Serial.print(rider.endLat, 6);
             Serial.print(",");
-            Serial.println(rider.latlng[3], 6);
+            Serial.println(rider.endLng, 6);
+        }
+        else
+        {
+            rider.endLat = 0;
+            rider.endLng = 0;
         }
         Serial.print("Time elapsed: ");
         Serial.println(rider.stuntTime);
+        Serial.print("Average wheelie angle: ");
+        Serial.println(averageYAngle);
+        xQueueSend(riderData, &rider ,500);
+        // Send the data directly to server until we get storage figured out
+        
         // Send the data to the microSD where another task will upload data from the microSD to the web server
 
-        vTaskDelay(250);
+        vTaskDelay(1000);
     }
 }
 
@@ -245,7 +330,7 @@ void readGPS_t(void *queue)
 }
 
 // read the mpu6050 data and send to a queue
-void readMPU6050(void *queue)
+void readMPU6050_t(void *queue)
 {
     vTaskDelay(5000);
     // initialize device
