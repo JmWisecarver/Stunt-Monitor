@@ -211,6 +211,7 @@ void collectData_t(void *queue)
             baseSet = true;
         }
     }
+    double angleYData = basePosition;
     Serial.printf("Base position is:");
     Serial.println(basePosition);
     unsigned long startTime;
@@ -222,11 +223,10 @@ void collectData_t(void *queue)
 
         // get lat/long data and time for start
 
-        double angleYData = 0;
         int loop = 0;
         double averageYAngle = 0;
         // Repeatedly get accelerometer information here and move on when ending circumstances met
-        //Wheelie or stoppie must be ~38 degrees in either direction
+        //Wheelie or stoppie must be ~35 degrees in either direction
         while((angleYData < 35 + basePosition) && (angleYData > -35 + basePosition))
         {
             if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
@@ -345,7 +345,7 @@ void readMPU6050_t(void *queue)
             }
         }
 
-        mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+        mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
         Serial.print("MPU6050 initialized for range ");
         switch (mpu.getAccelerometerRange())
         {
