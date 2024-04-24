@@ -198,10 +198,19 @@ void communicateWithServer_t(void * queue)
                     http.end();
                 }
                 else
-                {
-                    Serial.println("WiFi Disconnected, saving data to SD card.");
-                    sd.writeDataSD("pendingData.json", jsonDoc.c_str(), false);
-                }
+                    {
+                        Serial.println("WiFi Disconnected, saving data to SD card.");
+
+                        // Generate a filename with a timestamp
+                        String filename = "pendingData_" + String(millis()) + ".json";
+
+                        if (!sd.writeDataSD(filename.c_str(), jsonDoc.c_str(), false)) {
+                            Serial.println("Failed to write data to SD card");
+                        } else {
+                            Serial.println("Data saved to SD card: " + filename);
+                        }
+                    }
+
             }
         }
         vTaskDelay(500);
@@ -219,11 +228,11 @@ void checkForPendingSD() {
     File file = root.openNextFile();
     while (file) {
         String fileName = file.name();
-        if (!file.isDirectory() && fileName.endsWith(".json")) {  // Check if the file is a .json file
+        if (!file.isDirectory() && fileName.endsWith(".json") && !fileName.startsWith("._")) {  // Check if the file is a .json file and not a system file
             String data;
             File dataFile = SD.open(fileName, FILE_READ);
             if (!dataFile) {
-                Serial.print("Failed to open file: ");
+                Serial.print("Failed to open file for read: ");
                 Serial.println(fileName);
                 file = root.openNextFile();
                 continue;
@@ -235,7 +244,7 @@ void checkForPendingSD() {
             dataFile.close();
 
             if (uploadSDDataToServer(fileName.c_str(), data)) {
-                Serial.print("Successfully uploaded: ");
+                Serial.print("Successfully uploaded and now removing: ");
                 Serial.println(fileName);
                 SD.remove(fileName); // Remove the file after uploading
             } else {
@@ -247,6 +256,7 @@ void checkForPendingSD() {
     }
     root.close(); 
 }
+
 
 
 void collectData_t(void *queue)
