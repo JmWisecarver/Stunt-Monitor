@@ -8,8 +8,10 @@
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
+#include "sdStunt.h"
 
 #define ARDUINOJSON_USE_DOUBLE 1
+#define CS_PIN 15  // Chip select pin for the SD card, this can be any GPIO pin
 
 // MPU6050 addresses
 // #define MPU6050_ADDRESS_AD0_LOW 0x68 // address pin low (GND), default for InvenSense evaluation board
@@ -22,6 +24,8 @@ void readGPS_t(void *queue);
 void readMPU6050_t(void *queue);
 void communicateWithServer_t(void * queue);
 double getRelativeDegrees(double base);
+bool uploadSDDataToServer(const char* filename, const String& data);
+void checkForPendingSD();
 
 // NOTE: a squid is a slang term for a "show off" on a street bike
 class squid
@@ -82,11 +86,23 @@ typedef struct AccelData
 
 TinyGPSPlus gps;
 Adafruit_MPU6050 mpu;
+SDStunt sd(CS_PIN); // CS_PIN is the chip select pin for the SD card
+
 
 void setup()
 {
     Serial.begin(9600);
     Wire.begin(23, 22);
+
+    if (!sd.begin()) {
+        Serial.println("SD Card initialization failed!");
+    } else {
+        Serial.println("SD Card initialized successfully.");
+    }
+    // clear out any pending data on the SD card....this just converts them to .bak files
+    // instead of erasing them
+    sd.backupJsonFiles();
+
 
     i2cMutex = xSemaphoreCreateMutex();
     QueueHandle_t gpsReadings;
@@ -103,6 +119,7 @@ void setup()
     xTaskCreate(collectData_t, "Collect data from the reading tasks", 8096, (void *)collectDataQueues_ptr, 4, NULL);
     xTaskCreate(readMPU6050_t, "Read MPU6050 data", 2048, (void *)accelReadings, 3, NULL);
     xTaskCreate(communicateWithServer_t, "Handle communications with HTTP server", 16192, (void *)riderData, 5, NULL);
+
 }
 
 //Make degrees more human readable to a range of -180 to 180
@@ -162,6 +179,9 @@ void communicateWithServer_t(void * queue)
                 {
                 if(WiFi.status() == WL_CONNECTED)
                 {
+                    // Check for pending data on the SD card, if there is upload then clear 
+                    checkForPendingSD();  
+
                     WiFiClient client;
                     HTTPClient http;
 
@@ -179,7 +199,8 @@ void communicateWithServer_t(void * queue)
                 }
                 else
                 {
-                    Serial.println("WiFi Disconnected");
+                    Serial.println("WiFi Disconnected, saving data to SD card.");
+                    sd.writeDataSD("pendingData.json", jsonDoc.c_str(), false);
                 }
             }
         }
@@ -187,6 +208,46 @@ void communicateWithServer_t(void * queue)
     }
     
 }
+
+void checkForPendingSD() {
+    File root = SD.open("/");
+    if (!root) {
+        Serial.println("Failed to open root directory for reading.");
+        return;
+    }
+
+    File file = root.openNextFile();
+    while (file) {
+        String fileName = file.name();
+        if (!file.isDirectory() && fileName.endsWith(".json")) {  // Check if the file is a .json file
+            String data;
+            File dataFile = SD.open(fileName, FILE_READ);
+            if (!dataFile) {
+                Serial.print("Failed to open file: ");
+                Serial.println(fileName);
+                file = root.openNextFile();
+                continue;
+            }
+            
+            while (dataFile.available()) {
+                data += (char)dataFile.read();
+            }
+            dataFile.close();
+
+            if (uploadSDDataToServer(fileName.c_str(), data)) {
+                Serial.print("Successfully uploaded: ");
+                Serial.println(fileName);
+                SD.remove(fileName); // Remove the file after uploading
+            } else {
+                Serial.print("Failed to upload file: ");
+                Serial.println(fileName);
+            }
+        }
+        file = root.openNextFile(); // Move to the next file in the directory
+    }
+    root.close(); 
+}
+
 
 void collectData_t(void *queue)
 {
@@ -482,6 +543,26 @@ void readMPU6050_t(void *queue)
         vTaskDelay(100);
     }
 }
+
+bool uploadSDDataToServer(const char* filename, const String& data) {
+    HTTPClient http;
+    http.begin("http://stunt-monitor.lithium720.pw/receive.php");  
+    http.addHeader("Content-Type", "application/json");
+    int httpResponseCode = http.POST(data);
+
+    if (httpResponseCode > 0) {
+        Serial.print("HTTP Response code: ");
+        Serial.println(httpResponseCode);
+        http.end();
+        return httpResponseCode == 200;
+    } else {
+        Serial.print("Error code: ");
+        Serial.println(httpResponseCode);
+        http.end();
+        return false;
+    }
+}
+
 
 void loop()
 {
