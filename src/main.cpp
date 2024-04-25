@@ -159,6 +159,7 @@ void communicateWithServer_t(void * queue)
             double lng_begin = rider.beginLng;
             double lat_end = rider.endLat;
             double lng_end = rider.endLng;
+            bool wasDisconnected = false;
 
             Serial.println(rider.beginLat);
             Serial.println(rider.beginLng);
@@ -179,8 +180,14 @@ void communicateWithServer_t(void * queue)
                 {
                 if(WiFi.status() == WL_CONNECTED)
                 {
+
+
                     // Check for pending data on the SD card, if there is upload then clear 
-                    checkForPendingSD();  
+                    // I only want to perform this check upon REconnection
+                    if(wasDisconnected){
+                        checkForPendingSD();
+                        wasDisconnected = false;
+                    }
 
                     WiFiClient client;
                     HTTPClient http;
@@ -197,9 +204,9 @@ void communicateWithServer_t(void * queue)
 
                     http.end();
                 }
-                else
-                    {
+                else{
                         Serial.println("WiFi Disconnected, saving data to SD card.");
+                        wasDisconnected = true;
 
                         // Generate a filename with a timestamp
                         String filename = "pendingData_" + String(millis()) + ".json";
