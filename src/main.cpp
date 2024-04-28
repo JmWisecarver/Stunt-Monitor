@@ -9,6 +9,7 @@
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
 #include "sdStunt.h"
+#include <Adafruit_NeoPixel.h>
 
 #define ARDUINOJSON_USE_DOUBLE 1
 #define CS_PIN 15  // Chip select pin for the SD card, this can be any GPIO pin
@@ -101,7 +102,16 @@ void setup()
     }
     // clear out any pending data on the SD card....this just converts them to .bak files
     // instead of erasing them
+    #define NEOPIXEL_LED 19
+    #define LED_LENGTH 8
     sd.backupJsonFiles();
+    Adafruit_NeoPixel strip =
+    Adafruit_NeoPixel(LED_LENGTH, NEOPIXEL_LED, NEO_GRBW + NEO_KHZ800);
+    strip.setPixelColor(0, 0x000000);
+        strip.setPixelColor(1, 0x000000);
+        strip.setPixelColor(2, 0x000000);
+        strip.setPixelColor(3, 0x000000);
+        strip.show();
 
 
     i2cMutex = xSemaphoreCreateMutex();
@@ -137,8 +147,8 @@ void communicateWithServer_t(void * queue)
     QueueHandle_t riderDataQueue = (QueueHandle_t)queue;
     unsigned long lastTime = 0;
     unsigned long timerDelay = 5000;
-    const char * ssid = "AndroidAP235F";
-    const char* password = "umbl7415";
+    const char * ssid = "JSW-Pixel";
+    const char* password = "2086403284";
     String serverName = "http://stunt-monitor.lithium720.pw/receive.php";
     //Connect to phones hotspot
     WiFi.begin(ssid, password);
@@ -264,8 +274,7 @@ void checkForPendingSD() {
     root.close(); 
 }
 
-
-
+//Receive all the data from the various devices for reading
 void collectData_t(void *queue)
 {
     dataQueues *queueStruct = (dataQueues *)queue;
@@ -305,7 +314,7 @@ void collectData_t(void *queue)
         double averageYAngle = 0;
         // Repeatedly get accelerometer information here and move on when ending circumstances met
         //Wheelie or stoppie must be ~35 degrees in either direction
-        while((angleYData < 35 + basePosition) && (angleYData > -35 + basePosition))
+        while((angleYData < 30 + basePosition) && (angleYData > -30 + basePosition))
         {
             if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
             {
@@ -334,16 +343,30 @@ void collectData_t(void *queue)
             }
         // Timeout, Wheelie end, Stoppie end, crash movement stopped etc.
         // NOTE: wheelies have potential to go for minutes at a time and thus the timeout cannot be too soon.
-        while((angleYData >= 35 + basePosition) || (angleYData <= -35 + basePosition))
+        bool wheeliestop = false;
+        int whoolieTest = 0;
+        while(wheeliestop == false)
         {
-            if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
+            if(xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
             {
                 angleYData = getRelativeDegrees(accelData_ptr->AngleY);
-                loop++;
-                averageYAngle = angleYData + averageYAngle;
-                delete accelData_ptr; // free the memory
-                accelData_ptr = nullptr;
-                Serial.println(angleYData);
+                whoolieTest++;
+                if(whoolieTest > 10) {
+                    wheeliestop = true;
+                }
+                while((angleYData >= 25 + basePosition) || (angleYData <= -25 + basePosition))
+                {
+                    if (xQueueReceive(accelReadings, &accelData_ptr, 500) == pdTRUE)
+                    {
+                        angleYData = getRelativeDegrees(accelData_ptr->AngleY);
+                        loop++;
+                        averageYAngle = angleYData + averageYAngle;
+                        delete accelData_ptr; // free the memory
+                        accelData_ptr = nullptr;
+                        Serial.println(angleYData);
+                        whoolieTest = 0;
+                    }
+                }
             }
         }
         averageYAngle = averageYAngle/loop;
@@ -370,7 +393,11 @@ void collectData_t(void *queue)
         Serial.println(rider.stuntTime);
         Serial.print("Average wheelie angle: ");
         Serial.println(averageYAngle);
-        xQueueSend(riderData, &rider ,500);
+        //Send the server data if the wheelie exceeds three seconds.
+        if(rider.stuntTime > 3000)
+        {
+            xQueueSend(riderData, &rider ,500);
+        }
         // Send the data directly to server until we get storage figured out
         
         // Send the data to the microSD where another task will upload data from the microSD to the web server
@@ -385,7 +412,8 @@ void readGPS_t(void *queue)
 {
     QueueHandle_t gpsReadings = (QueueHandle_t)queue;
     // This will be changed to regular serial once I can't help it anymore or I get better debugging tools
-    SoftwareSerial SoftSerial(13, 12);
+    vTaskDelay(1000);
+    SoftwareSerial SoftSerial(21, 14);    //13 12
     SoftSerial.begin(9600);
     double latlng[1];
 
@@ -399,6 +427,8 @@ void readGPS_t(void *queue)
                 {
                     latlng[0] = gps.location.lat();
                     latlng[1] = gps.location.lng();
+                    //Serial.print("CurrentPos: ");
+                    //Serial.println(latlng[0]);
                     xQueueSend(gpsReadings, &latlng, 0);
                 }
             }
