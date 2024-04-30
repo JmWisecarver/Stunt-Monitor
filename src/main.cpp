@@ -1,4 +1,10 @@
-// #include <Arduino.h>
+/********************STUNT MONITOR********************/
+//  Authors:    Jeremy Wisecarver,
+//              Kevin Wing,
+//              Gary Banks
+/********************STUNT MONITOR********************/
+//Kevin Wing also credited for formatting our paper in IEEE format
+
 #include <SoftwareSerial.h>
 #include "TinyGPS++.h"
 #include <Adafruit_MPU6050.h>
@@ -89,7 +95,8 @@ TinyGPSPlus gps;
 Adafruit_MPU6050 mpu;
 SDStunt sd(CS_PIN); // CS_PIN is the chip select pin for the SD card
 
-
+//Jeremy Wisecarver
+//Gary Banks
 void setup()
 {
     Serial.begin(9600);
@@ -107,6 +114,7 @@ void setup()
     sd.backupJsonFiles();
     Adafruit_NeoPixel strip =
     Adafruit_NeoPixel(LED_LENGTH, NEOPIXEL_LED, NEO_GRBW + NEO_KHZ800);
+    //Changing the GPS pins caused pixel to turn on so this just turns it back off in a quick and dirty fashion
     strip.setPixelColor(0, 0x000000);
         strip.setPixelColor(1, 0x000000);
         strip.setPixelColor(2, 0x000000);
@@ -132,6 +140,7 @@ void setup()
 
 }
 
+//Jeremy W
 //Make degrees more human readable to a range of -180 to 180
 double getRelativeDegrees(double degrees)
 {
@@ -142,6 +151,8 @@ double getRelativeDegrees(double degrees)
     return degrees;
 }
 
+//Jeremy W, Gary Banks
+//Send data from ESP32 to the server using WiFi hotspot
 void communicateWithServer_t(void * queue)
 {
     QueueHandle_t riderDataQueue = (QueueHandle_t)queue;
@@ -235,6 +246,7 @@ void communicateWithServer_t(void * queue)
     
 }
 
+//Gary Banks
 void checkForPendingSD() {
     File root = SD.open("/");
     if (!root) {
@@ -274,6 +286,7 @@ void checkForPendingSD() {
     root.close(); 
 }
 
+//Jeremy Wisecarver
 //Receive all the data from the various devices for reading
 void collectData_t(void *queue)
 {
@@ -406,8 +419,8 @@ void collectData_t(void *queue)
     }
 }
 
-// For testing purposes the AirGrove is set up in this code to use the second grove port on the vanduino
-// The grove connection is labeled GP13/GP12
+//Jeremy Wisecarver
+// The grove connection is labeled GP06/GP07
 void readGPS_t(void *queue)
 {
     QueueHandle_t gpsReadings = (QueueHandle_t)queue;
@@ -437,7 +450,7 @@ void readGPS_t(void *queue)
     }
 }
 
-// read the mpu6050 data and send to a queue
+// Kevin Wing
 void readMPU6050_t(void *queue)
 {
     vTaskDelay(5000);
@@ -591,6 +604,7 @@ void readMPU6050_t(void *queue)
     }
 }
 
+//Gary Banks
 bool uploadSDDataToServer(const char* filename, const String& data) {
     HTTPClient http;
     http.begin("http://stunt-monitor.lithium720.pw/receive.php");  
@@ -609,7 +623,6 @@ bool uploadSDDataToServer(const char* filename, const String& data) {
         return false;
     }
 }
-
 
 void loop()
 {

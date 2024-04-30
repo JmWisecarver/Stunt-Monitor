@@ -1,4 +1,6 @@
-// sdStunt.h
+/*AUTHOR OF THIS FILE IS GARY BANKS*/
+
+
 #ifndef SD_STUNT_H
 #define SD_STUNT_H
 
