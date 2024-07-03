@@ -177,10 +177,8 @@ void setup()
 
 //Jeremy W
 //Make degrees more human readable to a range of -180 to 180
-double getRelativeDegrees(double degrees)
-{
-    if(degrees > 180)
-    {
+double getRelativeDegrees(double degrees)   {
+    if(degrees > 180)   {
         degrees = degrees - 360;
     }
     return degrees;
@@ -188,8 +186,7 @@ double getRelativeDegrees(double degrees)
 
 //Jeremy W, Gary Banks
 //Send data from ESP32 to the server using WiFi hotspot
-void communicateWithServer_t(void * queue)
-{
+void communicateWithServer_t(void * queue)  {
     QueueHandle_t riderDataQueue = (QueueHandle_t)queue;
     unsigned long lastTime = 0;
     unsigned long timerDelay = 5000;
