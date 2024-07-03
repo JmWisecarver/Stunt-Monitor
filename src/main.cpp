@@ -591,6 +591,7 @@ void readMPU6050_t(void *queue)
             mpu.getEvent(&a, &g, &temp);
             xSemaphoreGive(i2cMutex);
         }
+        
 
         // create a struct pointer to send to the queue
         accelData_ptr = new AccelData;
@@ -634,7 +635,6 @@ void readMPU6050_t(void *queue)
         xQueueSend(accelQueue, &accelData_ptr, 0);
 
         // Make sure to delete the memory in the consumer task
-
         vTaskDelay(100);
     }
 }
